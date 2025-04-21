@@ -1,0 +1,87 @@
+import boto3
+import os
+import json
+import pymysql
+from datetime import datetime
+
+TEST_ACCOUNTS = [
+    {"account_id": "1234123513", "role_name": "test-role"}
+]
+
+def get_secret():
+    client = boto3.client('secretsmanager', endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
+    response = client.get_secret_value(SecretId='aws/assume-role/creds')
+    secret = json.loads(response['SecretString'])
+    return secret['aws_access_key_id'], secret['aws_secret_access_key']
+
+def assume_role(account_id: str, role_name: str, base_session) -> boto3.Session:
+    sts = base_session.client('sts')
+    role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
+    resp = sts.assume_role(RoleArn=role_arn, RoleSessionName="SyncSession")
+    creds = resp['Credentials']
+    return boto3.Session(
+        aws_access_key_id=creds['AccessKeyId'],
+        aws_secret_access_key=creds['SecretAccessKey'],
+        aws_session_token=creds['SessionToken']
+    )
+
+def get_vpcs(session: boto3.Session):
+    ec2 = session.client('ec2')
+    vpcs = ec2.describe_vpcs()
+    return [vpc['VpcId'] for vpc in vpcs['Vpcs']]
+
+def connect_mysql():
+    return pymysql.connect(
+        host=os.getenv('DB_HOST'),
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASS'),
+        database=os.getenv('DB_NAME'),
+        port=int(os.getenv('DB_PORT', 3306)),
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+def create_table_if_not_exists(conn, table_name):
+    with conn.cursor() as cursor:
+        sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            account_id VARCHAR(20),
+            vpc_id VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        cursor.execute(sql)
+    conn.commit()
+
+def insert_vpcs(conn, account_id, vpc_ids):
+    with conn.cursor() as cursor:
+        for vpc_id in vpc_ids:
+            cursor.execute(
+                "INSERT INTO vpcs (account_id, vpc_id) VALUES (%s, %s)",
+                (account_id, vpc_id)
+            )
+    conn.commit()
+
+def lambda_handler(event, context):
+    access_key, secret_key = get_secret()
+
+    base_session = boto3.Session(
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key
+    )
+
+    conn = connect_mysql()
+    create_table_if_not_exists(conn, 'vpcs')
+
+    for account in TEST_ACCOUNTS:
+        session = assume_role(account["account_id"], account["role_name"], base_session)
+        vpc_ids = get_vpcs(session)
+        print(f"Account: {account['account_id']} - VPCs: {vpc_ids}")
+        insert_vpcs(conn, account["account_id"], vpc_ids)
+
+    conn.close()
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Metadata collection complete!')
+    }
