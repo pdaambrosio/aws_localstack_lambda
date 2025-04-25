@@ -29,6 +29,11 @@ def assume_role(account_id: str, role_name: str, base_session) -> boto3.Session:
         aws_session_token=creds['SessionToken']
     )
 
+def get_instances(session):
+    ec2 = session.client('ec2')
+    instances = ec2.describe_instances()
+    return instances['Reservations']
+
 def get_vpcs(session: boto3.Session) -> list:
     ec2 = session.client('ec2')
     vpcs = ec2.describe_vpcs()
@@ -86,7 +91,18 @@ def lambda_handler(event, context):
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
+
+    instance_table_sql: str = """
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        account_id VARCHAR(20),
+        instance_id VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+
     create_table_if_not_exists(conn, vpc_table_sql.format(table_name='vpcs'))
+    create_table_if_not_exists(conn, instance_table_sql.format(table_name='instances'))
 
     for account in TEST_ACCOUNTS:
         account_id = account['account_id']
@@ -95,10 +111,12 @@ def lambda_handler(event, context):
         session = assume_role(account_id, role_name, base_session)
 
         vpc_ids = get_vpcs(session)
+        # instances = get_instances(session)
 
         items = [{'account_id': account_id, 'vpc_id': vpc_id} for vpc_id in vpc_ids]
         insert_items(conn, 'vpcs', items, ['account_id', 'vpc_id'])
-
+        # instance_items = [{'account_id': account_id, 'instance_id': instance['InstanceId']} for reservation in instances for instance in reservation['Instances']]
+        # insert_items(conn, 'instances', instance_items, ['account_id', 'instance_id'])
     conn.close()
 
     return {
