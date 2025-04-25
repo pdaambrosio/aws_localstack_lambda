@@ -2,13 +2,24 @@ import boto3
 import os
 import json
 import pymysql
-from datetime import datetime
+# from datetime import datetime
 
 TEST_ACCOUNTS = [
     {"account_id": "1234123513", "role_name": "test-role"}
 ]
 
 def get_secret():
+    """
+    Retrieves AWS access key and secret access key from AWS Secrets Manager.
+
+    The function connects to the AWS Secrets Manager using the endpoint URL
+    specified in the `AWS_ENDPOINT_URL` environment variable. It fetches the
+    secret with the ID `aws/assume-role/creds` and extracts the access key
+    and secret access key from the secret's JSON string.
+
+    Returns:
+        tuple: A tuple containing the AWS access key ID and secret access key.
+    """
     client = boto3.client('secretsmanager', endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
     response = client.get_secret_value(SecretId='aws/assume-role/creds')
     secret = json.loads(response['SecretString'])
