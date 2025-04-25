@@ -64,13 +64,24 @@ def create_table_if_not_exists(conn, table_name):
         cursor.execute(sql)
     conn.commit()
 
-def insert_vpcs(conn, account_id, vpc_ids):
+# def insert_vpcs(conn, account_id, vpc_ids):
+#     with conn.cursor() as cursor:
+#         for vpc_id in vpc_ids:
+#             cursor.execute(
+#                 "INSERT INTO vpcs (account_id, vpc_id) VALUES (%s, %s)",
+#                 (account_id, vpc_id)
+#             )
+#     conn.commit()
+
+def insert_items(conn: pymysql.connections.Connection, table_name: str, items: list, columns: list) -> None:
+    placeholders = ', '.join(['%s'] * len(columns))
+    columns_str = ', '.join(columns)
+
     with conn.cursor() as cursor:
-        for vpc_id in vpc_ids:
-            cursor.execute(
-                "INSERT INTO vpcs (account_id, vpc_id) VALUES (%s, %s)",
-                (account_id, vpc_id)
-            )
+        sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
+        for item in items:
+            values = tuple(item[col] for col in columns)
+            cursor.execute(sql, values)
     conn.commit()
 
 def lambda_handler(event, context):
