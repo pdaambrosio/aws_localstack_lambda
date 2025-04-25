@@ -2,24 +2,17 @@ import boto3
 import os
 import json
 import pymysql
+from dotenv import load_dotenv
 # from datetime import datetime
 
+load_dotenv()
+
 TEST_ACCOUNTS = [
-    {"account_id": "1234123513", "role_name": "test-role"}
+    {"account_id": "000000000000", "role_name": "test-role"}
 ]
 
-def get_secret():
-    """
-    Retrieves AWS access key and secret access key from AWS Secrets Manager.
-
-    The function connects to the AWS Secrets Manager using the endpoint URL
-    specified in the `AWS_ENDPOINT_URL` environment variable. It fetches the
-    secret with the ID `aws/assume-role/creds` and extracts the access key
-    and secret access key from the secret's JSON string.
-
-    Returns:
-        tuple: A tuple containing the AWS access key ID and secret access key.
-    """
+def get_secret() -> tuple:
+    print(os.getenv("AWS_ENDPOINT_URL"))
     client = boto3.client('secretsmanager', endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
     response = client.get_secret_value(SecretId='aws/assume-role/creds')
     secret = json.loads(response['SecretString'])
@@ -99,13 +92,10 @@ def lambda_handler(event, context):
         account_id = account['account_id']
         role_name = account['role_name']
 
-        # Assume role in the target account
         session = assume_role(account_id, role_name, base_session)
 
-        # Retrieve VPC IDs
         vpc_ids = get_vpcs(session)
 
-        # Insert VPC IDs into MySQL database
         items = [{'account_id': account_id, 'vpc_id': vpc_id} for vpc_id in vpc_ids]
         insert_items(conn, 'vpcs', items, ['account_id', 'vpc_id'])
 
