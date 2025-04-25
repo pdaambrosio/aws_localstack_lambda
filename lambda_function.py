@@ -36,12 +36,12 @@ def assume_role(account_id: str, role_name: str, base_session) -> boto3.Session:
         aws_session_token=creds['SessionToken']
     )
 
-def get_vpcs(session: boto3.Session):
+def get_vpcs(session: boto3.Session) -> list:
     ec2 = session.client('ec2')
     vpcs = ec2.describe_vpcs()
     return [vpc['VpcId'] for vpc in vpcs['Vpcs']]
 
-def connect_mysql():
+def connect_mysql() -> pymysql.connections.Connection:
     return pymysql.connect(
         host=os.getenv('DB_HOST'),
         user=os.getenv('DB_USER'),
@@ -51,16 +51,8 @@ def connect_mysql():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-def create_table_if_not_exists(conn, table_name):
+def create_table_if_not_exists(conn, sql: str) -> None:
     with conn.cursor() as cursor:
-        sql = f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            account_id VARCHAR(20),
-            vpc_id VARCHAR(50),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
         cursor.execute(sql)
     conn.commit()
 
@@ -93,17 +85,33 @@ def lambda_handler(event, context):
     )
 
     conn = connect_mysql()
-    create_table_if_not_exists(conn, 'vpcs')
+    vpc_table_sql: str = """
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        account_id VARCHAR(20),
+        vpc_id VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    create_table_if_not_exists(conn, vpc_table_sql.format(table_name='vpcs'))
 
     for account in TEST_ACCOUNTS:
-        session = assume_role(account["account_id"], account["role_name"], base_session)
+        account_id = account['account_id']
+        role_name = account['role_name']
+
+        # Assume role in the target account
+        session = assume_role(account_id, role_name, base_session)
+
+        # Retrieve VPC IDs
         vpc_ids = get_vpcs(session)
-        print(f"Account: {account['account_id']} - VPCs: {vpc_ids}")
-        insert_vpcs(conn, account["account_id"], vpc_ids)
+
+        # Insert VPC IDs into MySQL database
+        items = [{'account_id': account_id, 'vpc_id': vpc_id} for vpc_id in vpc_ids]
+        insert_items(conn, 'vpcs', items, ['account_id', 'vpc_id'])
 
     conn.close()
 
     return {
         'statusCode': 200,
-        'body': json.dumps('Metadata collection complete!')
+        'body': json.dumps('VPC IDs inserted successfully!')
     }
