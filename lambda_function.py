@@ -29,7 +29,7 @@ def assume_role(account_id: str, role_name: str, base_session) -> boto3.Session:
         aws_session_token=creds['SessionToken']
     )
 
-def get_instances(session):
+def get_instances(session: boto3.Session) -> list:
     ec2 = session.client('ec2')
     instances = ec2.describe_instances()
     return instances['Reservations']
